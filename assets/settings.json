@@ -1,0 +1,20 @@
+{
+    "DEBUG": true,
+    "NAME_KEY": "name",
+    "ANIMATION_KEY": "animations",
+
+
+    "IDLE_ANIMATION": "idle",
+    "MOVE_ANIMATION": "move",
+    "RUN_ANIMATION": "run",
+    "FALL_ANIMATION": "fall",
+
+    "CHARACTER_WIDTH": 100,
+    "CHARACTER_HEIGHT": 100,
+
+
+    "MINIMUM_WINDOW_WIDTH": 300,
+    "MINIMUM_WINDOW_HEIGHT": 100
+
+    
+}

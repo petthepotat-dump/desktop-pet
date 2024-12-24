@@ -1,0 +1,10 @@
+{
+  "name": "Astro",
+  "parent_folder": "assets",
+  "animations": {
+    "fall": ["pet-fall.gif"],
+    "idle": ["pet-idle1.gif", "pet-idle2.gif", "pet-idle3.gif"],
+    "move": ["pet-mode.gif"],
+    "run": ["pet-run.gif"]
+  }
+}
