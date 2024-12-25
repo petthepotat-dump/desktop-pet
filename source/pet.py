@@ -3,8 +3,8 @@ import json
 import random
 
 from PyQt5.QtWidgets import QLabel, QVBoxLayout
-from PyQt5.QtCore import QObject, Qt
-from PyQt5.QtGui import QMovie
+from PyQt5.QtCore import QObject, Qt, QTimer
+from PyQt5.QtGui import QMovie, QPainter
 
 from source import settings, desktop
 
@@ -45,12 +45,14 @@ class PetObject(QLabel):
 
     def __init__(self, parent, pet_data: str):
         super().__init__(parent)
+        self.parent = parent
+
         self.animation_cache = PetAnimationCache(pet_data)
         self.active_movie_name = "idle"
         self.active_movie = None
 
         # create label
-        self._pos = Vector2((200, 800))
+        self._pos = Vector2((800, 200))
         self._rect = Rect(0, 0, settings.CHARACTER_WIDTH, settings.CHARACTER_HEIGHT)
         self._vel = Vector2()
 
@@ -83,10 +85,10 @@ class PetObject(QLabel):
         self.setMovie(self.active_movie)
         self.active_movie.start()
 
-    def update_and_render(self):
+    def paintEvent(self, event):
         # is a state machine -- update all states!
-        windows = desktop.get_active_windows()
-        blocks = [window["area"] for window in windows]
+        windows = self.parent.world.get_active_windows()
+        blocks = [window.area for window in windows]
 
         # if not touching down should fall down
 
@@ -150,4 +152,12 @@ class PetObject(QLabel):
 
         # update geometry
         self.setGeometry(self._rect.x, self._rect.y, self._rect.w, self._rect.h)
-        print(hit, self._rect, self._vel)
+        # print(hit, self._rect, self._vel)
+
+        # ------------------------- #
+        # draw the pet
+        painter = QPainter(self)
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.fillRect(self.rect(), Qt.transparent)  # Clear the background
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+        super().paintEvent(event)  # Call QLabel's paintEvent to draw the QMovie

@@ -14,7 +14,8 @@
 
 
     "MINIMUM_WINDOW_WIDTH": 300,
-    "MINIMUM_WINDOW_HEIGHT": 100
-
+    "MINIMUM_WINDOW_HEIGHT": 100,
     
+    "WORLD_DELTA": 2,
+    "FPS": 16
 }

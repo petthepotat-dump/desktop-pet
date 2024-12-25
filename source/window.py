@@ -1,4 +1,5 @@
 import sys
+import time
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor, QPainter, QMovie
 from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget
@@ -14,6 +15,7 @@ class TransparentWindow(QMainWindow):
         # grab size of monitor
         self.screen = QApplication.primaryScreen()
         w, h = self.screen.size().width(), self.screen.size().height()
+        self.setWindowTitle(settings.APPLICATION_NAME)
 
         # Set up the window
         self.setWindowFlags(
@@ -26,16 +28,11 @@ class TransparentWindow(QMainWindow):
         self.setGeometry(0, 0, w, h)
 
         # ============================================ #
+        # the world
+        self.world = desktop.World()
 
         # the pet
         self.pet = pet.PetObject(self, "assets/pet.json")
-
-        # create a label + movie
-        self.label = QLabel(self)
-        self.label.setGeometry(800, 200, 100, 100)
-        self.movie = QMovie("assets/pet-idle3.gif")
-        self.label.setMovie(self.movie)
-        self.movie.start()
 
         # ============================================ #
 
@@ -48,9 +45,9 @@ class TransparentWindow(QMainWindow):
         painter = QPainter(self)
 
         # clear surface
-        painter.setBrush(QColor(0, 0, 0, 0))
-        painter.setPen(Qt.NoPen)
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
         painter.fillRect(self.rect(), Qt.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
 
         if settings.DEBUG:
             # draw overlay
@@ -62,10 +59,7 @@ class TransparentWindow(QMainWindow):
             # draw rectangles around all active windows within the desktop
             painter.setPen(QColor(255, 255, 255, 255))
             painter.setBrush(QColor(0, 0, 0, 0))
-            for window in desktop.get_active_windows():
-                area = window["area"]
+            for window in self.world.iter_active_windows():
+                area = window.area
                 # draw rect
                 painter.drawRect(area.x, area.y, area.w, area.h)
-
-        # render the pet
-        self.pet.update_and_render()

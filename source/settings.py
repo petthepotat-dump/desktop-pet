@@ -1,5 +1,6 @@
 import sys
 import json
+import time
 
 # ============================================================================== #
 # constants
@@ -9,6 +10,7 @@ SETTINGS_FILE = "assets/settings.json"
 DEBUG = False
 FPS = 16
 DELTA = 1 / FPS
+WORLD_DELTA = 2
 
 NAME_KEY = "name"
 ANIMATION_KEY = "animations"
@@ -23,6 +25,24 @@ CHARACTER_HEIGHT = 100
 
 MINIMUM_WINDOW_WIDTH = 100
 MINIMUM_WINDOW_HEIGHT = 100
+
+# other contants
+
+START_TIME = time.time()
+ILLEGAL_WINDOW_NAMES = [
+    # windows
+    "Program Manager",
+    "Start",
+    "Settings",
+    "Microsoft Store",
+    # mac
+    "Screenshot",
+    "Notification Center",
+    "Control Center",
+]
+MANDATORY_WINDOW_NAMES = ["Dock", "Finder", "SystemUIServer"]
+
+APPLICATION_NAME = "DesktopPet"
 
 # ============================================================================== #
 # functions
@@ -59,3 +79,9 @@ def init():
     global MINIMUM_WINDOW_WIDTH, MINIMUM_WINDOW_HEIGHT
     MINIMUM_WINDOW_WIDTH = settings["MINIMUM_WINDOW_WIDTH"]
     MINIMUM_WINDOW_HEIGHT = settings["MINIMUM_WINDOW_HEIGHT"]
+
+    # set fps
+    global FPS, DELTA, WORLD_DELTA
+    FPS = settings["FPS"]
+    DELTA = 1 / FPS
+    WORLD_DELTA = settings["WORLD_DELTA"]
