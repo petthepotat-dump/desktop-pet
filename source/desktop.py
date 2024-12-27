@@ -4,7 +4,7 @@ import time
 from PyQt5.QtCore import QTimer
 
 from pygame import Rect
-from source import settings
+from source import settings, utils
 
 
 def is_valid_window(window: dict) -> bool:
@@ -114,7 +114,7 @@ class Window:
 # world
 class World:
     def __init__(self):
-        self.windows: ("PID", "Value") = {}
+        self.windows: ["Window"] = []
 
         # create a timer to update valid windows
         self.timer = QTimer()
@@ -122,44 +122,47 @@ class World:
         self.timer.start(1000 // settings.FPS)
         self.update()
 
+        # desktop screen dimensions
+        self.screen = Quartz.CGMainDisplayID()
+        self.screen_width = Quartz.CGDisplayPixelsWide(self.screen)
+        self.screen_height = Quartz.CGDisplayPixelsHigh(self.screen)
+
     def iter_active_windows(self):
-        for pid in self.windows:
-            if self.windows[pid].active:
-                yield self.windows[pid]
+        for window in self.windows:
+            if window.active:
+                yield window
 
     def get_active_windows(self):
-        return [x for x in self.windows.values() if x.active]
+        return [x for x in self.windows if x.active]
 
     def update(self):
         # grab all windows + update valid windows
         all_windows = get_active_windows()
 
-        # set all windows to inactive
-        for wid in self.windows:
-            self.windows[wid].active = False
-            self.windows[wid].on_screen = False
+        # reset all available windows
+        self.windows = []
         for window in all_windows:
-            if window["pid"] not in self.windows:
-                self.windows[window["pid"]] = Window(
-                    window["area"],
-                    window["pid"],
-                    window["name"],
-                    window["owner"],
-                    1000 - window["wid"],
-                    window["global"],
-                    window["mandatory"],
-                )
-            else:
-                self.windows[window["pid"]].area = window["area"]
-                self.windows[window["pid"]].layer = 1000 - window["wid"]
-            self.windows[window["pid"]].on_screen = True
+            item = Window(
+                window["area"],
+                window["pid"],
+                window["name"],
+                window["owner"],
+                1000 - window["wid"],
+                window["global"],
+                window["mandatory"],
+            )
+            item.on_screen = True
+            self.windows.append(item)
+        self.windows.sort(key=lambda x: -x.layer)
 
         # =============================== #
-        print(f"TIME: {time.time()-settings.START_TIME} | updating the world")
+        # print(f"TIME: {time.time()-settings.START_TIME} | updating the world")
+
+        # for w in get_active_windows():
+        #     print(w["name"], w["owner"], w["pid"], w["layer"], w["wid"])
 
         # print out all active window layers and owners
-        win_array = [x for x in self.windows.values() if x.on_screen]
-        win_array.sort(key=lambda x: -x.layer)
+        win_array = [x for x in self.windows if x.on_screen]
         # for w in win_array:
         #     print(w)
 
@@ -185,6 +188,57 @@ class World:
         # end
 
         # print active windows
-        print("ACTIVE WINDOWS")
-        for w in self.iter_active_windows():
-            print(w)
+        # print("ACTIVE WINDOWS")
+        # for w in self.iter_active_windows():
+        #     print(w)
+
+    def move_pet(self, pet: "PetObject"):
+        """Move the pet object"""
+        hit = {"top": False, "right": False, "bottom": False, "left": False}
+        pet._vel.y += pet.MS
+
+        blocks = [window.area for window in self.iter_active_windows()]
+
+        # Separating Axis Theorem
+        # x-axis
+        pet._pos.x += pet._vel.x * settings.DELTA
+        pet._rect.x = pet._pos.x
+
+        # y-axis
+        pet._pos.y += pet._vel.y * settings.DELTA
+        pet._rect.y = pet._pos.y
+
+        for rect in blocks:
+            # check if collide with top line or bottom line
+            top = Rect(rect.x, rect.y, rect.w, 1)
+            bottom = Rect(rect.x, rect.y + rect.h, rect.w, 1)
+            # top line
+            if pet._rect.colliderect(top):
+                if pet._vel.y > 0:
+                    hit["bottom"] = True
+                    pet._vel.y = 0
+                    pet._pos.y = top.top - pet._rect.h + 1
+                else:
+                    hit["top"] = True
+                    pet._vel.y = 0
+                    pet._pos.y = top.bottom - 1
+            # bottom line
+            if pet._rect.colliderect(bottom):
+                if pet._vel.y > 0:
+                    hit["bottom"] = True
+                    pet._vel.y = 0
+                    pet._pos.y = bottom.top - pet._rect.h + 1
+                else:
+                    hit["top"] = True
+                    pet._vel.y = 0
+                    pet._pos.y = bottom.bottom - 1
+        # restriction #1 - cannot fall out of bottom of screen
+        if pet._rect.bottom >= self.screen_height:
+            hit["bottom"] = True
+            pet._vel.y = 0
+            pet._rect.bottom = self.screen_height
+
+        # lerp
+        pet._vel.xy *= 0.7
+
+        return hit

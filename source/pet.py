@@ -3,13 +3,17 @@ import json
 import random
 
 from PyQt5.QtWidgets import QLabel, QVBoxLayout
-from PyQt5.QtCore import QObject, Qt, QTimer
-from PyQt5.QtGui import QMovie, QPainter
+from PyQt5.QtCore import QObject, Qt, QTimer, QEvent
+from PyQt5.QtGui import QMovie, QPainter, QTransform
 
 from source import settings, desktop
 
 from pygame import Rect
 from pygame.math import Vector2
+
+
+from source import statemachine
+from source.statemachine import StateMachineComponent, State
 
 
 # ============================================================================== #
@@ -41,7 +45,7 @@ class PetAnimationCache:
 
 
 class PetObject(QLabel):
-    MS = 10
+    MS = 30
 
     def __init__(self, parent, pet_data: str):
         super().__init__(parent)
@@ -55,6 +59,7 @@ class PetObject(QLabel):
         self._pos = Vector2((800, 200))
         self._rect = Rect(0, 0, settings.CHARACTER_WIDTH, settings.CHARACTER_HEIGHT)
         self._vel = Vector2()
+        self._flipped = False
 
         # select a movie
         self.active_movie = random.choice(
@@ -63,12 +68,48 @@ class PetObject(QLabel):
         self.setMovie(self.active_movie)
         self.active_movie.start()
 
-        self._timer = 0
-
         # ============================================ #
         # setup world interaction
 
-        pass
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+
+        # features
+        self.is_dragged = False
+        self.drag_offset = Vector2()
+
+        # target location
+        self._target_location = None
+        self.current_window = None
+
+        # statemachine
+        self.statemachine = PetStateMachine(self)
+        self.statemachine.add_state(IdleState())
+        self.statemachine.add_state(MoveState())
+        self.statemachine.add_state(RunState())
+        self.statemachine.add_state(FallState())
+        self.statemachine.set_current_state("idle")
+
+        # ============================================ #
+
+    # ------------------------- #
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.is_dragged = True
+            self.drag_offset = Vector2(event.pos().x(), event.pos().y())
+
+    def mouseMoveEvent(self, event):
+        if self.is_dragged:
+            delta = event.pos()
+            self._rect.x = event.globalPos().x() - self.drag_offset.x
+            self._rect.y = event.globalPos().y() - self.drag_offset.y
+            self._pos.xy = self._rect.topleft
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.is_dragged = False
+
+    # ------------------------- #
 
     def update_animation(self, new_ani):
         if new_ani == self.active_movie_name:
@@ -81,7 +122,9 @@ class PetObject(QLabel):
 
     def update_animation_isotope(self):
         self.active_movie.stop()
-        self.active_movie = self.animation_cache.get(new_ani)[0]
+        self.active_movie = random.choice(
+            list(self.animation_cache.get(self.active_movie_name))
+        )
         self.setMovie(self.active_movie)
         self.active_movie.start()
 
@@ -90,69 +133,20 @@ class PetObject(QLabel):
         windows = self.parent.world.get_active_windows()
         blocks = [window.area for window in windows]
 
-        # if not touching down should fall down
-
-        #  TOP RIGHT BOTTOM LEFT
-        hit = [0, 0, 0, 0]
-        self._vel.y = self.MS
-
         # ------------------------- #
-        # animation clock timer
-        if self._timer > 2.5:  # 2.5 seconds
-            self._timer = 0
-            # change animation
-            self.update_animation_isotope()
+        # statemachine everything
+        self.statemachine.update()
 
-        # ------------------------- #
-        # perform movement with respect to each axis independently
-
-        # x axis
-        self._pos.x += self._vel.x * settings.DELTA
-        self._rect.x = self._pos.x
-
-        # y axis
-        self._pos.y += self._vel.y * settings.DELTA
-        self._rect.y = self._pos.y
-        for rect in blocks:
-            # check if collide with top line or bottom line
-            top = Rect(rect.x, rect.y, rect.w, 1)
-            bottom = Rect(rect.x, rect.y + rect.h, rect.w, 1)
-            # top line
-            if self._rect.colliderect(top):
-                if self._vel.y > 0:
-                    hit[2] = 1
-                    self._vel.y = 0
-                    self._pos.y = top.top - self._rect.h + 1
-                else:
-                    hit[0] = 1
-                    self._vel.y = 0
-                    self._pos.y = top.bottom - 1
-            # bottom line
-            if self._rect.colliderect(bottom):
-                if self._vel.y > 0:  # down
-                    hit[2] = 1
-                    self._vel.y = 0
-                    self._pos.y = bottom.top - self._rect.h + 1
-                else:  # up
-                    hit[0] = 1
-                    self._vel.y = 0
-                    self._pos.y = bottom.bottom - 1
-        # restriction #1 - cannot fall out of bottom of screen
-        if self._rect.bottom >= self.parentWidget().height():
-            hit[2] = 1
-            self._vel.y = 0
-            self._rect.bottom = self.parentWidget().height()
-
-        # ------------------------- #
-        # conditional animation
-        if hit[2] == 1:
-            self.update_animation("idle")
-        else:
-            self.update_animation("fall")
+        # update current window
+        for window in windows:
+            if window.area.colliderect(self._rect):
+                self.current_window = window
+                break
 
         # update geometry
-        self.setGeometry(self._rect.x, self._rect.y, self._rect.w, self._rect.h)
-        # print(hit, self._rect, self._vel)
+        # self.setGeometry(self._rect.x, self._rect.y, self._rect.w, self._rect.h)
+        self.setGeometry(0, 0, self._rect.w, self._rect.h)
+        # print(self._rect, self._vel)
 
         # ------------------------- #
         # draw the pet
@@ -160,4 +154,189 @@ class PetObject(QLabel):
         painter.setCompositionMode(QPainter.CompositionMode_Source)
         painter.fillRect(self.rect(), Qt.transparent)  # Clear the background
         painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-        super().paintEvent(event)  # Call QLabel's paintEvent to draw the QMovie
+        # super().paintEvent(event)  # Call QLabel's paintEvent to draw the QMovie
+
+        # custom draw command
+        frame_pixmap = self.active_movie.currentPixmap()
+        if self._flipped:
+            frame_pixmap = frame_pixmap.transformed(QTransform().scale(-1, 1))
+        painter.drawPixmap(0, 0, frame_pixmap)
+
+
+# ============================================================================== #
+# statemachine
+
+
+class PetStateMachine(StateMachineComponent):
+    def __init__(self, pet: "PetObject"):
+        super().__init__()
+        self.pet = pet
+
+
+# ---------------------------- #
+class IdleState(State):
+    def __init__(self):
+        super().__init__("idle")
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(self._timer_update)
+
+        self.idle_move_timer = QTimer()
+        self.idle_move_timer.timeout.connect(self._move_timer_update)
+
+    def __post_init__(self, statemachine: "PetStateMachine"):
+        self._statemachine = statemachine
+
+    # ---------------------------- #
+
+    def on_enter(self):
+        self._statemachine.pet.update_animation("idle")
+        self.timer.start(int(3000 + (random.random() - 0.5) * 2000))
+        self.idle_move_timer.start(int(8000 + (random.random() - 0.5) * 5000))
+        self._statemachine.pet._target_location = None
+
+    def on_exit(self):
+        self.timer.stop()
+        self.idle_move_timer.stop()
+
+    def _move_timer_update(self):
+        # decide on a place to move towards
+        self._statemachine.pet._target_location = self.generate_random_target()
+        self._statemachine.set_next_state("move")
+
+        print(
+            "moving to:",
+            self._statemachine.pet._target_location,
+            "from: ",
+            {
+                "window": self._statemachine.pet.current_window,
+                "pos": self._statemachine.pet._pos,
+            },
+        )
+
+    def _timer_update(self):
+        self._statemachine.pet.update_animation_isotope()
+
+    def update(self):
+        hit = self._statemachine.pet.parent.world.move_pet(self._statemachine.pet)
+        if not hit["bottom"]:
+            self._statemachine.set_next_state("fall")
+
+    def generate_random_target(self) -> {"window": "pid", "pos": "Vector2"}:
+        # choose inside or outside
+        inside = random.choice([True, False])
+        target_window = None
+        if not inside or self._statemachine.pet.current_window == None:
+            # find a new window
+            target_window = random.choice(
+                self._statemachine.pet.parent.world.get_active_windows()
+            )
+        else:
+            target_window = self._statemachine.pet.current_window
+        target_position = Vector2()
+        # generate random x
+        target_position.x = int(
+            target_window.area.x + random.random() * target_window.area.w
+        )
+        # pick top or bottom
+        if random.choice([True, False]):
+            # top
+            target_position.y = target_window.area.y - self._statemachine.pet._rect.h
+        else:
+            # bottom
+            target_position.y = (
+                target_window.area.y
+                + target_window.area.h
+                - self._statemachine.pet._rect.h
+            )
+
+        return {"window": target_window, "pos": target_position}
+
+
+class MoveState(State):
+    def __init__(self):
+        super().__init__("move")
+
+        # target location
+        self.target_location = None
+
+        # target validity timer
+        self._target_validity_timer = QTimer()
+        self._target_validity_timer.timeout.connect(self._target_validity_timer_update)
+
+    def __post_init__(self, statemachine: "PetStateMachine"):
+        self._statemachine = statemachine
+
+    # ---------------------------- #
+
+    def on_enter(self):
+        self._target_validity_timer.start(200)
+        self.target_location = self._statemachine.pet._target_location
+        self._statemachine.pet.update_animation("run")
+
+    def on_exit(self):
+        self._target_validity_timer.stop()
+        self.target_location = None
+
+    def _target_validity_timer_update(self):
+        # check if target is still valid
+        if self._statemachine.pet._target_location["window"] != None:
+            if not self._statemachine.pet._target_location["window"].active:
+                self._statemachine.set_next_state("idle")
+
+    def update(self):
+        if not self.target_location:
+            self._statemachine.set_next_state("idle")
+            return
+
+        # set velocity
+        self._statemachine.pet._vel.x = (
+            1.0
+            if self.target_location["pos"].x > self._statemachine.pet._pos.x
+            else -1.0
+        ) * self._statemachine.pet.MS
+        self._statemachine.pet._flipped = self._statemachine.pet._vel.x < 0
+
+        # check if x error is close enough
+        if abs(self.target_location["pos"].x - self._statemachine.pet._pos.x) < 10:
+            self._statemachine.pet._vel.x = 0
+            self._statemachine.set_next_state("idle")
+            print("reached x")
+            # perform the jump animation !!!
+            # self._statemachine.set_next_state("move_jump")
+            return
+
+        # move towards target location
+        hit = self._statemachine.pet.parent.world.move_pet(self._statemachine.pet)
+        # if falling
+        if hit["bottom"] == False:
+            self._statemachine.pet.update_animation("fall")
+        else:
+            self._statemachine.pet.update_animation("run")
+
+
+class RunState(State):
+    def __init__(self):
+        super().__init__("run")
+
+    def __post_init__(self, statemachine: "PetStateMachine"):
+        self._statemachine = statemachine
+
+    def update(self):
+        pass
+
+
+class FallState(State):
+    def __init__(self):
+        super().__init__("fall")
+
+    def __post_init__(self, statemachine: "PetStateMachine"):
+        self._statemachine = statemachine
+
+    def on_enter(self):
+        self._statemachine.pet.update_animation("fall")
+
+    def update(self):
+        hit = self._statemachine.pet.parent.world.move_pet(self._statemachine.pet)
+        if hit["bottom"]:
+            self._statemachine.set_next_state("idle")

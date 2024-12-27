@@ -28,6 +28,8 @@ MINIMUM_WINDOW_HEIGHT = 100
 
 # other contants
 
+
+ICON_PATH = "assets/icon.png"
 START_TIME = time.time()
 ILLEGAL_WINDOW_NAMES = [
     # windows
