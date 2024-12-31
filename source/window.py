@@ -24,7 +24,7 @@ from AppKit import (
 from PyObjCTools.AppHelper import runEventLoop
 
 
-from source import pet, desktop, settings
+from source import pet, desktop, settings, signal
 
 
 # ============================================ #
@@ -63,11 +63,32 @@ class TransparentWindow(QMainWindow):
         self.installEventFilter(self.pet)
 
         # ============================================ #
+        # event handlers
+        signal.SignalHandler.add_receiver("hide", self.receive_hide_event)
+        signal.SignalHandler.add_receiver("show", self.receive_show_event)
 
-        # 24 fps timer
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.update)
-        self.timer.start(1000 // settings.FPS)
+    # ============================================ #
+    # event handlers
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Space:
+            signal.SignalHandler.add_signal("custom", {})
+
+    def receive_hide_event(self, args):
+        self.hide()
+
+    def receive_show_event(self, args):
+        self.show()
+
+    def update_state(self):
+
+        self.pet.update_state()
+
+        # move the window around on the screen
+        self.move(self.pet._rect.x, self.pet._rect.y)
+
+        # draw self
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -92,9 +113,6 @@ class TransparentWindow(QMainWindow):
                 # draw rect
                 painter.drawRect(area.x, area.y, area.w, area.h)
 
-        # # move the window around on the screen
-        self.move(self.pet._rect.x, self.pet._rect.y)
-
 
 # supporting application
 class StatusBarApp:
@@ -110,7 +128,6 @@ class StatusBarApp:
         # set icon for status bar item
         icon = NSImage.alloc().initWithContentsOfFile_(settings.ICON_PATH)
 
-        print(icon, settings.ICON_PATH)
         icon.setSize_((18, 18))
         self.status_item.button().setImage_(icon)
 
@@ -126,6 +143,39 @@ class StatusBarApp:
         self.quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "Quit", "terminate:", ""
         )
-
-        # add menu items to menu
         self.menu.addItem_(self.quit_item)
+
+        # create hide item
+        self.hide_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Hide", "hideevent:", ""
+        )
+        self.hide_item.setTarget_(self)
+        self.menu.addItem_(self.hide_item)
+
+        # create show item
+        self.show_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Show", "showevent:", ""
+        )
+        self.show_item.setTarget_(self)
+        self.menu.addItem_(self.show_item)
+
+        # create reset item
+        self.reset_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Reset", "resetevent:", ""
+        )
+        self.reset_item.setTarget_(self)
+        self.menu.addItem_(self.reset_item)
+
+    # ============================================ #
+    # event handlers
+
+    def hideevent_(self, sender):
+        # print("event received")
+        signal.SignalHandler.add_signal("hide", {})
+
+    def showevent_(self, sender):
+        # print("event received", sender)
+        signal.SignalHandler.add_signal("show", {})
+
+    def resetevent_(self, sender):
+        signal.SignalHandler.add_signal("reset", {})

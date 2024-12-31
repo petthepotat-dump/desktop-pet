@@ -4,19 +4,15 @@ import random
 
 from PyQt5.QtWidgets import QLabel, QVBoxLayout
 from PyQt5.QtCore import QObject, Qt, QTimer, QEvent
-from PyQt5.QtGui import QMovie, QPainter, QTransform
+from PyQt5.QtGui import QMovie, QPainter, QTransform, QImageReader, QPixmap
 
 from source import settings, desktop
 
 from pygame import Rect
 from pygame.math import Vector2
 
-
-from source import statemachine
+from source import statemachine, settings, signal
 from source.statemachine import StateMachineComponent, State
-
-
-# ============================================================================== #
 
 
 # ============================================================================== #
@@ -33,15 +29,28 @@ class PetAnimationCache:
 
         # load items into cache
         self.cache = {}
+        self.cache_imagereader = {}
         for key, val in self.metadata[settings.ANIMATION_KEY].items():
             # multiple items
             self.cache[key] = [QMovie(os.path.join(self.parent_folder, v)) for v in val]
-            # [print(os.path.join(self.parent_folder, v)) for v in val]
+            self.cache_imagereader[key] = [
+                QImageReader(os.path.join(self.parent_folder, v)) for v in val
+            ]
+            self.cache[key].sort(key=lambda x: x.fileName())
+            self.cache_imagereader[key].sort(key=lambda x: x.fileName())
+
+            print([v.fileName() for v in self.cache[key]])
 
         print(self.cache)
 
     def get(self, key: str) -> QMovie:
         return self.cache[key]
+
+    def get_index(self, key: str, index: int) -> QMovie:
+        return self.cache[key][index]
+
+    def get_image_reader_index(self, key: str, index: int) -> QImageReader:
+        return self.cache_imagereader[key][index]
 
 
 class PetObject(QLabel):
@@ -56,7 +65,12 @@ class PetObject(QLabel):
         self.active_movie = None
 
         # create label
-        self._pos = Vector2((800, 200))
+        self._pos = Vector2(
+            (
+                random.randint(10, self.parent.world.screen_width - 10),
+                random.randint(10, self.parent.world.screen_height - 10),
+            )
+        )
         self._rect = Rect(0, 0, settings.CHARACTER_WIDTH, settings.CHARACTER_HEIGHT)
         self._vel = Vector2()
         self._flipped = False
@@ -67,6 +81,8 @@ class PetObject(QLabel):
         )
         self.setMovie(self.active_movie)
         self.active_movie.start()
+
+        self.backup_frame = None
 
         # ============================================ #
         # setup world interaction
@@ -85,13 +101,28 @@ class PetObject(QLabel):
         self.statemachine = PetStateMachine(self)
         self.statemachine.add_state(IdleState())
         self.statemachine.add_state(MoveState())
-        self.statemachine.add_state(RunState())
         self.statemachine.add_state(FallState())
+        self.statemachine.add_state(JumpStage1())
+        # self.statemachine.add_state(JumpStage2())
+
         self.statemachine.set_current_state("idle")
 
-        # ============================================ #
+        # signal handlers
+        signal.SignalHandler.add_receiver("reset", self.receive_reset_event)
+        signal.SignalHandler.add_receiver("custom", self.recieve_custom_event)
 
     # ------------------------- #
+
+    def recieve_custom_event(self, args):
+        print("custom event")
+        # run event
+        self.statemachine.set_next_state("jumpstage1")
+
+    def receive_reset_event(self, args):
+        self._pos.xy = (
+            random.randint(0, self.parent.world.screen_width - self._rect.w),
+            random.randint(0, self.parent.world.screen_height - self._rect.h),
+        )
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -111,14 +142,30 @@ class PetObject(QLabel):
 
     # ------------------------- #
 
-    def update_animation(self, new_ani):
-        if new_ani == self.active_movie_name:
+    def change_rect(self, widht: int, height: int):
+        self._rect.w = widht
+        self._rect.h = height
+
+    # ------------------------- #
+
+    def update_animation(self, new_ani, index: int = -1):
+        if new_ani == self.active_movie_name and index == -1:
             return
-        self.active_movie.stop()
-        self.active_movie = random.choice(list(self.animation_cache.get(new_ani)))
+        if self.active_movie:
+            self.active_movie.stop()
+        if index != -1:
+            self.active_movie = self.animation_cache.get_index(new_ani, index)
+        else:
+            self.active_movie = random.choice(list(self.animation_cache.get(new_ani)))
         self.setMovie(self.active_movie)
         self.active_movie.start()
         self.active_movie_name = new_ani
+
+    def remove_movie(self):
+        if self.active_movie:
+            self.active_movie.stop()
+            self.active_movie = None
+            self.setMovie(None)
 
     def update_animation_isotope(self):
         self.active_movie.stop()
@@ -128,14 +175,10 @@ class PetObject(QLabel):
         self.setMovie(self.active_movie)
         self.active_movie.start()
 
-    def paintEvent(self, event):
+    def update_state(self):
         # is a state machine -- update all states!
         windows = self.parent.world.get_active_windows()
         blocks = [window.area for window in windows]
-
-        # ------------------------- #
-        # statemachine everything
-        self.statemachine.update()
 
         # update current window
         for window in windows:
@@ -143,24 +186,30 @@ class PetObject(QLabel):
                 self.current_window = window
                 break
 
+        # ------------------------- #
+        # statemachine
+        self.statemachine.update()
+
         # update geometry
         # self.setGeometry(self._rect.x, self._rect.y, self._rect.w, self._rect.h)
-        self.setGeometry(0, 0, self._rect.w, self._rect.h)
-        # print(self._rect, self._vel)
+        # self.setGeometry(0, 0, self._rect.w, self._rect.h)
 
+        self.update()
+
+    def paintEvent(self, event):
         # ------------------------- #
         # draw the pet
         painter = QPainter(self)
         painter.setCompositionMode(QPainter.CompositionMode_Source)
         painter.fillRect(self.rect(), Qt.transparent)  # Clear the background
         painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-        # super().paintEvent(event)  # Call QLabel's paintEvent to draw the QMovie
 
         # custom draw command
-        frame_pixmap = self.active_movie.currentPixmap()
-        if self._flipped:
-            frame_pixmap = frame_pixmap.transformed(QTransform().scale(-1, 1))
-        painter.drawPixmap(0, 0, frame_pixmap)
+        if self.active_movie != None:
+            frame_pixmap = self.active_movie.currentPixmap()
+            if self._flipped:
+                frame_pixmap = frame_pixmap.transformed(QTransform().scale(-1, 1))
+            painter.drawPixmap(0, 0, frame_pixmap)
 
 
 # ============================================================================== #
@@ -194,6 +243,14 @@ class IdleState(State):
         self.timer.start(int(3000 + (random.random() - 0.5) * 2000))
         self.idle_move_timer.start(int(8000 + (random.random() - 0.5) * 5000))
         self._statemachine.pet._target_location = None
+
+        # set geometry
+        self._statemachine.pet.setGeometry(
+            0,
+            0,
+            self._statemachine.pet._rect.w,
+            self._statemachine.pet._rect.h,
+        )
 
     def on_exit(self):
         self.timer.stop()
@@ -274,6 +331,14 @@ class MoveState(State):
         self.target_location = self._statemachine.pet._target_location
         self._statemachine.pet.update_animation("run")
 
+        # set geometry
+        self._statemachine.pet.setGeometry(
+            0,
+            0,
+            self._statemachine.pet._rect.w,
+            self._statemachine.pet._rect.h,
+        )
+
     def on_exit(self):
         self._target_validity_timer.stop()
         self.target_location = None
@@ -303,8 +368,7 @@ class MoveState(State):
             self._statemachine.set_next_state("idle")
             print("reached x")
             # perform the jump animation !!!
-            # self._statemachine.set_next_state("move_jump")
-            return
+            self._statemachine.set_next_state("jumpstage1")
 
         # move towards target location
         hit = self._statemachine.pet.parent.world.move_pet(self._statemachine.pet)
@@ -315,15 +379,66 @@ class MoveState(State):
             self._statemachine.pet.update_animation("run")
 
 
-class RunState(State):
+class JumpStage1(State):
     def __init__(self):
-        super().__init__("run")
+        super().__init__("jumpstage1")
+        self._orect = None
 
     def __post_init__(self, statemachine: "PetStateMachine"):
         self._statemachine = statemachine
 
+    # ---------------------------- #
+
+    def on_enter(self):
+        self._statemachine.pet.update_animation("jump", index=0)
+        # set animatino to specific frame = frame 25
+
+        self._orect = self._statemachine.pet._rect.copy()
+        # create new rect for new animation
+        # grab a frame from the movie
+        frame = self._statemachine.pet.active_movie.currentPixmap()
+        self._statemachine.pet.change_rect(frame.width(), frame.height())
+        # center to bottomcenter
+        self._statemachine.pet._rect.bottom = self._orect.bottom
+        self._statemachine.pet._rect.centerx = self._orect.centerx
+
+        # update parent area
+        self._statemachine.pet.parent.setGeometry(
+            self._statemachine.pet._rect.x,
+            self._statemachine.pet._rect.y,
+            self._statemachine.pet._rect.w,
+            self._statemachine.pet._rect.h,
+        )
+
+        # set geometry
+        self._statemachine.pet.setGeometry(
+            0,
+            0,
+            self._statemachine.pet._rect.w,
+            self._statemachine.pet._rect.h,
+        )
+
+    def on_exit(self):
+
+        # reset pet area
+        self._statemachine.pet.change_rect(
+            settings.CHARACTER_WIDTH, settings.CHARACTER_HEIGHT
+        )
+
+        # reset parent area
+        self._statemachine.pet.parent.setGeometry(
+            self._statemachine.pet._rect.x,
+            self._statemachine.pet._rect.y,
+            self._statemachine.pet._rect.w,
+            self._statemachine.pet._rect.h,
+        )
+
     def update(self):
-        pass
+        # on the 27th frame, we swap to other animation
+        # check if movie is playing
+        # print("jumping", self._statemachine.pet.active_movie.currentFrameNumber())
+        if self._statemachine.pet.active_movie.currentFrameNumber() > 24:
+            self._statemachine.set_next_state("idle")
 
 
 class FallState(State):
@@ -333,8 +448,18 @@ class FallState(State):
     def __post_init__(self, statemachine: "PetStateMachine"):
         self._statemachine = statemachine
 
+    # ---------------------------- #
+
     def on_enter(self):
         self._statemachine.pet.update_animation("fall")
+
+        # set geometry
+        self._statemachine.pet.setGeometry(
+            0,
+            0,
+            self._statemachine.pet._rect.w,
+            self._statemachine.pet._rect.h,
+        )
 
     def update(self):
         hit = self._statemachine.pet.parent.world.move_pet(self._statemachine.pet)

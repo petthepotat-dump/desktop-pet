@@ -5,6 +5,8 @@
     "fall": ["pet-fall.gif"],
     "idle": ["pet-idle1.gif", "pet-idle2.gif", "pet-idle3.gif"],
     "move": ["pet-mode.gif"],
-    "run": ["pet-run.gif"]
+    "run": ["pet-run.gif"],
+    "jump": ["pet-jump1.gif", "pet-jump2.gif"],
+    "roll": ["pet-roll.gif"]
   }
 }

@@ -1,16 +1,25 @@
 class SignalHandler:
 
     SIGNAL_QUEUE = []
+    SIGNAL_RECEIVERS = {}
 
-    def iterate_signals(self):
-        for signal in self.SIGNAL_QUEUE:
-            signal.execute()
-        self.SIGNAL_QUEUE = []
+    @classmethod
+    def iterate_signals(cls):
+        # print(cls.SIGNAL_QUEUE)
+        for signal in cls.SIGNAL_QUEUE:
+            receiver, args = signal
+            if receiver in cls.SIGNAL_RECEIVERS:
+                for function in cls.SIGNAL_RECEIVERS[receiver]:
+                    function(args)
+        cls.SIGNAL_QUEUE = []
 
+    @classmethod
+    def add_receiver(cls, receiver: str, function: "function"):
+        if receiver not in cls.SIGNAL_RECEIVERS:
+            cls.SIGNAL_RECEIVERS[receiver] = []
+        cls.SIGNAL_RECEIVERS[receiver].append(function)
 
-class Signal:
-    def __init__(self, handler: SignalHandler):
-        self.handler = handler
-
-    def execute(self):
-        pass
+    @classmethod
+    def add_signal(cls, receiver: str, args: dict):
+        # print(f"Adding signal {receiver} with args {args}")
+        cls.SIGNAL_QUEUE.append((receiver, args))

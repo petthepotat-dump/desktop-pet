@@ -167,17 +167,32 @@ class World:
         #     print(w)
 
         # for each window, check if its behind another window (determine validity)
-        # first is lowest -- forward check
+        # first is lowest -- forward checkc
         for i in range(len(win_array)):
             victim = win_array[i]
+
+            victim_rect = Rect(
+                max(victim.area.x, 0) + 1,
+                max(victim.area.y, 0) + 1,
+                victim.area.w + min(0, victim.area.x) - 2,
+                victim.area.h + min(0, victim.area.y) - 2,
+            )
+
             # check if behind another window
             for j in range(i):
                 container = win_array[j]
                 if container.is_mandatory:
                     continue
+
+                container_rect = Rect(
+                    max(container.area.x, 0),
+                    max(container.area.y, 0),
+                    container.area.w + min(0, container.area.x),
+                    container.area.h + min(0, container.area.y),
+                )
                 # check
                 if (
-                    container.area.contains(victim.area)
+                    container_rect.contains(victim_rect)
                     and container.layer > victim.layer
                 ):
                     victim.active = False
@@ -236,9 +251,11 @@ class World:
         if pet._rect.bottom >= self.screen_height:
             hit["bottom"] = True
             pet._vel.y = 0
-            pet._rect.bottom = self.screen_height
+            pet._rect.bottom = self.screen_height - 1
 
         # lerp
         pet._vel.xy *= 0.7
+
+        print(pet._pos, pet._vel, time.time() - settings.START_TIME)
 
         return hit
