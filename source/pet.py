@@ -1,17 +1,19 @@
 import os
 import json
+import math
+import time
 import random
 
 from PyQt5.QtWidgets import QLabel, QVBoxLayout
 from PyQt5.QtCore import QObject, Qt, QTimer, QEvent
-from PyQt5.QtGui import QMovie, QPainter, QTransform, QImageReader, QPixmap
+from PyQt5.QtGui import QMovie, QPainter, QTransform, QImageReader, QPixmap, QCursor
 
 from source import settings, desktop
 
 from pygame import Rect
 from pygame.math import Vector2
 
-from source import statemachine, settings, signal
+from source import statemachine, settings, signal, utils
 from source.statemachine import StateMachineComponent, State
 
 
@@ -39,9 +41,9 @@ class PetAnimationCache:
             self.cache[key].sort(key=lambda x: x.fileName())
             self.cache_imagereader[key].sort(key=lambda x: x.fileName())
 
-            print([v.fileName() for v in self.cache[key]])
+            # print([v.fileName() for v in self.cache[key]])
 
-        print(self.cache)
+        # print(self.cache)
 
     def get(self, key: str) -> QMovie:
         return self.cache[key]
@@ -54,7 +56,7 @@ class PetAnimationCache:
 
 
 class PetObject(QLabel):
-    MS = 30
+    MS = 50
 
     def __init__(self, parent, pet_data: str):
         super().__init__(parent)
@@ -67,8 +69,14 @@ class PetObject(QLabel):
         # create label
         self._pos = Vector2(
             (
-                random.randint(10, self.parent.world.screen_width - 10),
-                random.randint(10, self.parent.world.screen_height - 10),
+                int(
+                    random.randint(0, int(self.parent.world.screen_width * 0.6))
+                    + self.parent.world.screen_width * 0.2
+                ),
+                int(
+                    random.randint(0, int(self.parent.world.screen_height * 0.6))
+                    + self.parent.world.screen_height * 0.2,
+                ),
             )
         )
         self._rect = Rect(0, 0, settings.CHARACTER_WIDTH, settings.CHARACTER_HEIGHT)
@@ -114,9 +122,20 @@ class PetObject(QLabel):
     # ------------------------- #
 
     def recieve_custom_event(self, args):
-        print("custom event")
-        # run event
-        self.statemachine.set_next_state("jumpstage1")
+        # create target location at mouse location
+        mpos = QCursor.pos()
+        twin = None
+        for window in self.parent.world.get_active_windows():
+            if window.area.collidepoint(mpos.x(), mpos.y()):
+                twin = window
+                break
+
+        self._target_location = {
+            "window": twin,
+            "pos": Vector2(mpos.x(), mpos.y()),
+        }
+
+        self.statemachine.set_next_state("move")
 
     def receive_reset_event(self, args):
         self._pos.xy = (
@@ -252,6 +271,17 @@ class IdleState(State):
             self._statemachine.pet._rect.h,
         )
 
+        # reset parent area
+        self._statemachine.pet.parent.setGeometry(
+            self._statemachine.pet._rect.x,
+            self._statemachine.pet._rect.y,
+            self._statemachine.pet._rect.w,
+            self._statemachine.pet._rect.h,
+        )
+
+        print("in idle")
+        print(self._statemachine.pet._rect)
+
     def on_exit(self):
         self.timer.stop()
         self.idle_move_timer.stop()
@@ -275,6 +305,7 @@ class IdleState(State):
         self._statemachine.pet.update_animation_isotope()
 
     def update(self):
+
         hit = self._statemachine.pet.parent.world.move_pet(self._statemachine.pet)
         if not hit["bottom"]:
             self._statemachine.set_next_state("fall")
@@ -293,10 +324,17 @@ class IdleState(State):
         target_position = Vector2()
         # generate random x
         target_position.x = int(
-            target_window.area.x + random.random() * target_window.area.w
+            target_window.area.x
+            + target_window.area.w * 0.2
+            + random.random() * target_window.area.w * 0.6
         )
+
         # pick top or bottom
-        if random.choice([True, False]):
+        ans = random.choice([True, False])
+        # check if top will give valid y position
+        if target_window.area.y - self._statemachine.pet._rect.h < 5:
+            ans = False
+        if ans:
             # top
             target_position.y = target_window.area.y - self._statemachine.pet._rect.h
         else:
@@ -366,9 +404,16 @@ class MoveState(State):
         if abs(self.target_location["pos"].x - self._statemachine.pet._pos.x) < 10:
             self._statemachine.pet._vel.x = 0
             self._statemachine.set_next_state("idle")
-            print("reached x")
-            # perform the jump animation !!!
-            self._statemachine.set_next_state("jumpstage1")
+            # print("reached x")
+
+            # determine if needs to jump or not
+            # check if height is at least 80% of height of windnow
+            dy = self._statemachine.pet._rect.y - self.target_location["pos"].y
+
+            if dy > self._statemachine.pet._rect.h:
+                self._statemachine.set_next_state("jumpstage1")
+            else:
+                self._statemachine.set_next_state("idle")
 
         # move towards target location
         hit = self._statemachine.pet.parent.world.move_pet(self._statemachine.pet)
@@ -383,6 +428,11 @@ class JumpStage1(State):
     def __init__(self):
         super().__init__("jumpstage1")
         self._orect = None
+
+        # variables for jump length + jump height + etc
+        self._jump_delta = 0
+        self._start_time = 0
+        self._start_height = 0
 
     def __post_init__(self, statemachine: "PetStateMachine"):
         self._statemachine = statemachine
@@ -418,25 +468,63 @@ class JumpStage1(State):
             self._statemachine.pet._rect.h,
         )
 
+        # set start variables
+        self._start_height = self._statemachine.pet._rect.y
+        self._start_time = time.time()
+        self._jump_end_height = 0
+        self._jump_delta = 0
+
+        # print("starting jump?")
+
     def on_exit(self):
 
+        jump_rect = self._statemachine.pet._rect.copy()
         # reset pet area
         self._statemachine.pet.change_rect(
             settings.CHARACTER_WIDTH, settings.CHARACTER_HEIGHT
         )
-
-        # reset parent area
-        self._statemachine.pet.parent.setGeometry(
-            self._statemachine.pet._rect.x,
-            self._statemachine.pet._rect.y,
-            self._statemachine.pet._rect.w,
-            self._statemachine.pet._rect.h,
-        )
+        self._statemachine.pet._rect.bottom = jump_rect.bottom
+        self._statemachine.pet._pos.y = self._statemachine.pet._rect.y
+        # print(self._statemachine.pet._rect)
 
     def update(self):
         # on the 27th frame, we swap to other animation
         # check if movie is playing
         # print("jumping", self._statemachine.pet.active_movie.currentFrameNumber())
+
+        self._jump_delta = time.time() - self._start_time
+
+        # check if target location exists
+        if self._statemachine.pet._target_location != None:
+
+            # jump function
+            xfac = max(
+                0,
+                self._statemachine.pet.active_movie.currentFrameNumber() / 24 * 0.816497
+                - 0.4,
+            )
+            yfac = 1 - 6 * (xfac - math.sqrt(24) / 12) ** 2
+
+            if xfac < 0.408:  # before peak
+                endy = utils.lerp(
+                    self._start_height,
+                    self._statemachine.pet._target_location["pos"].y
+                    - self._statemachine.pet._rect.h,
+                    yfac,
+                )
+                self._jump_end_height = endy
+            else:  # after peak
+                endy = utils.lerp(
+                    self._jump_end_height,
+                    self._statemachine.pet._target_location["pos"].y
+                    - self._statemachine.pet._rect.h,
+                    yfac,
+                )
+
+            # print(endy, xfac)
+            self._statemachine.pet._rect.y = endy
+            self._statemachine.pet._pos.y = endy
+
         if self._statemachine.pet.active_movie.currentFrameNumber() > 24:
             self._statemachine.set_next_state("idle")
 
@@ -460,6 +548,9 @@ class FallState(State):
             self._statemachine.pet._rect.w,
             self._statemachine.pet._rect.h,
         )
+
+        # print("in fall state")
+        # print(self._statemachine.pet._rect)
 
     def update(self):
         hit = self._statemachine.pet.parent.world.move_pet(self._statemachine.pet)

@@ -256,6 +256,6 @@ class World:
         # lerp
         pet._vel.xy *= 0.7
 
-        print(pet._pos, pet._vel, time.time() - settings.START_TIME)
+        # print(pet._pos, pet._vel, time.time() - settings.START_TIME)
 
         return hit

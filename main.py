@@ -1,5 +1,6 @@
 import sys
 import time
+import psutil
 
 from PyQt5.QtWidgets import QApplication
 
@@ -35,6 +36,7 @@ if __name__ == "__main__":
 
         app.processEvents()
         signal_handler.iterate_signals()
+
         window.update_state()
 
         start_time = time.time()
