@@ -33,7 +33,7 @@ ICON_PATH = "assets/icon.png"
 START_TIME = time.time()
 ILLEGAL_WINDOW_NAMES = [
     # windows
-    "Program Manager",
+    "Microsoft Text Input Application",
     "Start",
     "Settings",
     "Microsoft Store",

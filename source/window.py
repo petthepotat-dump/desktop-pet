@@ -1,7 +1,7 @@
 import sys
 import time
 from PyQt5.QtCore import Qt, QTimer, QEvent
-from PyQt5.QtGui import QColor, QPainter, QMovie
+from PyQt5.QtGui import QColor, QPainter, QMovie, QIcon
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -10,19 +10,9 @@ from PyQt5.QtWidgets import (
     QWidget,
     QToolBar,
     QAction,
+    QSystemTrayIcon,
+    QMenu,
 )
-
-from AppKit import (
-    NSApplication,
-    NSApp,
-    NSImage,
-    NSStatusBar,
-    NSVariableStatusItemLength,
-    NSMenuItem,
-    NSMenu,
-)
-from PyObjCTools.AppHelper import runEventLoop
-
 
 from source import pet, desktop, settings, signal
 
@@ -117,54 +107,40 @@ class TransparentWindow(QMainWindow):
 # supporting application
 class StatusBarApp:
     def __init__(self):
-        self.app = NSApplication.sharedApplication()
-
-        # create status bar item
-        self.status_bar = NSStatusBar.systemStatusBar()
-        self.status_item = self.status_bar.statusItemWithLength_(
-            NSVariableStatusItemLength
-        )
+        self.tray_icon = QSystemTrayIcon()
 
         # set icon for status bar item
-        icon = NSImage.alloc().initWithContentsOfFile_(settings.ICON_PATH)
-
-        icon.setSize_((18, 18))
-        self.status_item.button().setImage_(icon)
+        icon = QIcon(settings.ICON_PATH)
+        self.tray_icon.setIcon(icon)
 
         # create menu for the status bar item
-        self.menu = NSMenu()
+        self.menu = QMenu()
         self.create_menu()
 
         # attach menu to status bar item
-        self.status_item.setMenu_(self.menu)
+        self.tray_icon.setContextMenu(self.menu)
+        self.tray_icon.show()
 
     def create_menu(self):
-        # create menu items
-        self.quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Quit", "terminate:", ""
-        )
-        self.menu.addItem_(self.quit_item)
-
         # create hide item
-        self.hide_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Hide", "hideevent:", ""
-        )
-        self.hide_item.setTarget_(self)
-        self.menu.addItem_(self.hide_item)
+        self.hide_item = QAction("Hide", self.menu)
+        self.hide_item.triggered.connect(self.hideevent_)
+        self.menu.addAction(self.hide_item)
 
         # create show item
-        self.show_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Show", "showevent:", ""
-        )
-        self.show_item.setTarget_(self)
-        self.menu.addItem_(self.show_item)
+        self.show_item = QAction("Show", self.menu)
+        self.show_item.triggered.connect(self.showevent_)
+        self.menu.addAction(self.show_item)
 
         # create reset item
-        self.reset_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Reset", "resetevent:", ""
-        )
-        self.reset_item.setTarget_(self)
-        self.menu.addItem_(self.reset_item)
+        self.reset_item = QAction("Reset", self.menu)
+        self.reset_item.triggered.connect(self.resetevent_)
+        self.menu.addAction(self.reset_item)
+
+        # create menu items
+        self.quit_item = QAction("Quit", self.menu)
+        self.quit_item.triggered.connect(self.quitevent_)
+        self.menu.addAction(self.quit_item)
 
     # ============================================ #
     # event handlers
@@ -179,3 +155,7 @@ class StatusBarApp:
 
     def resetevent_(self, sender):
         signal.SignalHandler.add_signal("reset", {})
+
+    def quitevent_(self, sender):
+        # quit the application
+        QApplication.quit()

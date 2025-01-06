@@ -1,5 +1,10 @@
-import Quartz
 import time
+import win32gui
+import win32process
+import win32con
+import psutil
+
+import ctypes
 
 from PyQt5.QtCore import QTimer
 
@@ -7,76 +12,73 @@ from pygame import Rect
 from source import settings, utils
 
 
-def is_valid_window(window: dict) -> bool:
+def is_valid_window(hwnd) -> bool:
     """
     Check if a window is valid.
     """
-    # if behind background or minimized
-    if window.get("kCGWindowLayer") < 0:
+    # Check if the window is visible
+    if not win32gui.IsWindowVisible(hwnd):
         return False
 
-    if window.get("kCGWindowName") == settings.APPLICATION_NAME:
+    # Check if window is minimized
+    if win32gui.IsIconic(hwnd):
         return False
 
-    # if window too small
-    area = window.get("kCGWindowBounds")
-    if (
-        area["Width"] < settings.MINIMUM_WINDOW_WIDTH
-        or area["Height"] < settings.MINIMUM_WINDOW_HEIGHT
-    ):
+    # Get window title
+    window_text = win32gui.GetWindowText(hwnd)
+    if not window_text or window_text == settings.APPLICATION_NAME:
         return False
 
-    # or not visible
-    if not window.get("kCGWindowIsOnscreen", False):
+    # Get window rectangle
+    rect = win32gui.GetWindowRect(hwnd)
+    width = rect[2] - rect[0]
+    height = rect[3] - rect[1]
+    if width < settings.MINIMUM_WINDOW_WIDTH or height < settings.MINIMUM_WINDOW_HEIGHT:
         return False
 
-    # or if part of illegal names
-    if window.get("kCGWindowOwnerName", "Unknown") in settings.ILLEGAL_WINDOW_NAMES:
+    # Check if window is part of illegal names
+    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+    process = psutil.Process(pid)
+    if process.name() in settings.ILLEGAL_WINDOW_NAMES:
         return False
 
     return True
 
 
-def is_mandatory_window(window: dict) -> bool:
+def is_mandatory_window(hwnd: dict) -> bool:
     """
     Check if a window is mandatory (dock or etc).
     """
-    return (
-        window.get("kCGWindowOwnerName", "Unknown") in settings.MANDATORY_WINDOW_NAMES
-    )
+    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+    process = psutil.Process(pid)
+    return process.name() in settings.MANDATORY_WINDOW_NAMES
 
 
-def get_active_windows(filters: int = Quartz.kCGWindowListOptionOnScreenOnly) -> list:
+def get_active_windows():
     """
     Get a list of active windows on the system.
     """
-    # Options for listing windows (visible, on-screen, etc.)
-    options = filters
 
-    # Get the list of all windows
-    window_list = Quartz.CGWindowListCopyWindowInfo(options, Quartz.kCGNullWindowID)
+    def callback(hwnd, windows):
+        if is_valid_window(hwnd):
+            rect = win32gui.GetWindowRect(hwnd)
+            window_info = {
+                "name": win32gui.GetWindowText(hwnd),
+                "owner": psutil.Process(
+                    win32process.GetWindowThreadProcessId(hwnd)[1]
+                ).name(),
+                "pid": win32process.GetWindowThreadProcessId(hwnd)[1],
+                "area": Rect(rect[0], rect[1], rect[2] - rect[0], rect[3] - rect[1]),
+                "wid": hwnd,
+                "layer": win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE),
+                "global": False,
+                "mandatory": is_mandatory_window(hwnd),
+            }
+            windows.append(window_info)
+        return True
 
-    # Parse and return useful information
     windows = []
-    for wid, window in enumerate(window_list):
-        if not is_valid_window(window):
-            continue
-
-        area = window.get("kCGWindowBounds")  # Bounds (position and size)
-        rect = Rect(area["X"], area["Y"], area["Width"], area["Height"])
-
-        window_info = {
-            "name": window.get("kCGWindowName", "Unknown"),  # Window title
-            "owner": window.get("kCGWindowOwnerName", "Unknown"),  # App name
-            "pid": window.get("kCGWindowOwnerPID"),  # Process ID
-            "area": rect,  # Area
-            "wid": wid,  # Layer (z-order)
-            "layer": window.get("kCGWindowLayer", 0),  # Layer (z-order)
-            "global": False,  # Global window
-            "mandatory": is_mandatory_window(window),  # Mandatory window
-        }
-        windows.append(window_info)
-
+    win32gui.EnumWindows(callback, windows)
     return windows
 
 
@@ -123,9 +125,9 @@ class World:
         self.update()
 
         # desktop screen dimensions
-        self.screen = Quartz.CGMainDisplayID()
-        self.screen_width = Quartz.CGDisplayPixelsWide(self.screen)
-        self.screen_height = Quartz.CGDisplayPixelsHigh(self.screen)
+        user32 = ctypes.windll.user32
+        self.screen_width = user32.GetSystemMetrics(0)
+        self.screen_height = user32.GetSystemMetrics(1)
 
     def iter_active_windows(self):
         for window in self.windows:
@@ -147,7 +149,7 @@ class World:
                 window["pid"],
                 window["name"],
                 window["owner"],
-                1000 - window["wid"],
+                window["wid"],
                 window["global"],
                 window["mandatory"],
             )
